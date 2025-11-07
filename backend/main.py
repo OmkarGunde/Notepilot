@@ -16,7 +16,8 @@ from supabase_service import get_notes, add_note, get_user_id_from_token
 
 # ---
 # --- 🛠️ CRITICAL TESSERACT FIX 🛠️ ---
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+#pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
 # ------------------------------------
 # ---
 
