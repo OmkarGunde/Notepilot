@@ -3,10 +3,10 @@
 import * as React from 'react';
 import { useState, useEffect, useMemo } from 'react'; // Import useMemo
 import { supabase } from './api/supabaseClient';
-import { aiChat } from './api/aiService'; 
-import { 
-  AppBar, Toolbar, Typography, Container, Box, CssBaseline, Button, TextField, 
-  ToggleButton, ToggleButtonGroup, IconButton, createTheme, ThemeProvider 
+import { aiChat } from './api/aiService';
+import {
+  AppBar, Toolbar, Typography, Container, Box, CssBaseline, Button, TextField,
+  ToggleButton, ToggleButtonGroup, IconButton, createTheme, ThemeProvider
 } from '@mui/material'; // Import Theme components
 import ViewModuleIcon from '@mui/icons-material/ViewModule';
 import ViewListIcon from '@mui/icons-material/ViewList';
@@ -21,14 +21,14 @@ import NoteEditor from './components/NoteEditor';
 import AIChat from './components/AIChat';
 
 export default function App() {
-  const [session, setSession] = useState(null); 
+  const [session, setSession] = useState(null);
   const [notebooks, setNotebooks] = useState([]);
   const [selectedNotebook, setSelectedNotebook] = useState(null);
   const [notes, setNotes] = useState([]);
   const [selectedNote, setSelectedNote] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [noteView, setNoteView] = useState('grid'); 
-  
+  const [noteView, setNoteView] = useState('grid');
+
   // --- 1. ADD DARK MODE STATE ---
   const [darkMode, setDarkMode] = useState(false);
 
@@ -50,7 +50,7 @@ export default function App() {
   // ------------------------------------
 
   const handleNoteViewChange = (event, newView) => {
-    if (newView !== null) { 
+    if (newView !== null) {
       setNoteView(newView);
     }
   };
@@ -71,6 +71,7 @@ export default function App() {
   // --- Data Fetching Effects ---
   useEffect(() => {
     if (session) fetchNotebooks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
   useEffect(() => {
@@ -85,9 +86,9 @@ export default function App() {
     if (!session) return;
     const { data } = await supabase.from('notebooks')
       .select('*')
-      .eq('user_id', session.user.id) 
+      .eq('user_id', session.user.id)
       .order('id', { ascending: true });
-    
+
     setNotebooks(data || []);
     if (!selectedNotebook && data && data.length > 0) {
       setSelectedNotebook(data[0]);
@@ -137,11 +138,11 @@ export default function App() {
       return;
     }
     if (!noteData.title || !noteData.content || !session) return;
-    
+
     const notePayload = {
       title: noteData.title,
       content: noteData.content,
-      notebook_id: selectedNotebook.id, 
+      notebook_id: selectedNotebook.id,
       user_id: session.user.id
     };
 
@@ -150,12 +151,12 @@ export default function App() {
     } else {
       await supabase.from('notes').update(notePayload).eq('id', noteData.id);
     }
-    setSelectedNote(null); 
+    setSelectedNote(null);
     fetchNotes();
   };
 
   const handleAutoSave = async (noteData) => {
-    if (!noteData.id || !noteData.title || !session) return; 
+    if (!noteData.id || !noteData.title || !session) return;
 
     const notePayload = {
       title: noteData.title,
@@ -166,7 +167,7 @@ export default function App() {
       .update(notePayload)
       .eq('id', noteData.id)
       .eq('user_id', session.user.id);
-    
+
     fetchNotes();
   };
 
@@ -181,7 +182,7 @@ export default function App() {
   // --- AI Chat Handler (No Changes) ---
   const handleAIChatMessage = async (text) => {
     if (!text.trim()) return;
-    const aiResponse = await aiChat(text); 
+    const aiResponse = await aiChat(text);
     return aiResponse;
   };
 
@@ -198,12 +199,12 @@ export default function App() {
         <CssBaseline />
         <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
           <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
-            
+
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Box 
+              <Box
                 component="img"
-                src="/notepilot_logo.png" 
-                sx={{ height: 32, width: 32, borderRadius: '50%' }} 
+                src="/notepilot_logo.png"
+                sx={{ height: 32, width: 32, borderRadius: '50%' }}
               />
               <Typography variant="h6" noWrap>
                 NotePilot
@@ -222,7 +223,7 @@ export default function App() {
 
           </Toolbar>
         </AppBar>
-        
+
         {/* --- 5. RENDER APP LOGIC --- */}
         {!session ? (
           // Show Login page if no session
@@ -241,24 +242,24 @@ export default function App() {
               onRenameNotebook={handleRenameNotebook}
               onDeleteNotebook={handleDeleteNotebook}
             />
-            
+
             <Box component="main" sx={{ flexGrow: 1, bgcolor: 'background.default', minHeight: "100vh", p: 3, pl: '240px' }}>
               <Toolbar />
               <Container maxWidth="md" sx={{ mt: 3 }}>
-                
+
                 {!selectedNote ? (
                   <>
-                    <AIChat 
+                    <AIChat
                       onSendMessage={(text) => handleAIChatMessage(text, "")}
                     />
-                
+
                     <Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, mt: 3, flexWrap: 'wrap', gap: 2 }}>
                         <Typography variant="h5">
                           Notes {selectedNotebook ? `in "${selectedNotebook.name}"` : ""}
                         </Typography>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <TextField 
+                          <TextField
                             label="Search Notes"
                             variant="outlined"
                             size="small"
@@ -281,21 +282,21 @@ export default function App() {
                         </Box>
                       </Box>
                       <NoteList
-                        notes={filteredNotes} 
+                        notes={filteredNotes}
                         onSelectNote={handleSelectNote}
                         onDeleteNote={handleDeleteNote}
                         onAddNote={() => setSelectedNote({ title: "", content: "", id: null })}
                         disabled={!selectedNotebook}
-                        viewMode={noteView} 
+                        viewMode={noteView}
                       />
                     </Box>
                   </>
                 ) : (
                   <Box sx={{ mt: 3 }}>
                     <Typography variant="h6">{selectedNote.id ? "Edit Note" : "Add Note"}</Typography>
-                    
+
                     {/* Note-aware chat */}
-                    <AIChat 
+                    <AIChat
                       onSendMessage={(text) => handleAIChatMessage(text, selectedNote.content)}
                     />
 
