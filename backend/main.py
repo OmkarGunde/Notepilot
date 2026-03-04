@@ -50,12 +50,7 @@ model = genai.GenerativeModel('gemini-1.5-flash')
 # --- CORS (Security) ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://localhost:3000",  # Allow your React app
-        f"chrome-extension://{EXTENSION_ID}",
-    ],
+    allow_origins=["*"], # Allow Vercel frontend in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -207,4 +202,5 @@ def read_root():
     return {"message": "NotePilot backend is up! Ready for extension/web app."}
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
