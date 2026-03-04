@@ -2,7 +2,7 @@
 
 import React, { useCallback, useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { 
+import {
   Box, TextField, Button, Typography, List, ListItem, CircularProgress, Paper,
   FormControl, InputLabel, Select, MenuItem, IconButton
 } from '@mui/material';
@@ -14,7 +14,7 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import TiptapEditor from './TiptapEditor';
 
 // --- ADDED: Import saveAs ---
-import { saveAs } from 'file-saver'; 
+import { saveAs } from 'file-saver';
 
 /* -------------------------------------------------------------------------- */
 /* 🧠 Enhanced Text-to-Speech Hook (with Language Selector)                   */
@@ -70,7 +70,7 @@ export default function NoteEditor({ note, onSave, onAutoSave }) {
 
   // --- Auto-Save Effect (DEBOUNCE) ---
   useEffect(() => {
-    if (!note || !note.id || !onAutoSave) { 
+    if (!note || !note.id || !onAutoSave) {
       return;
     }
     const timer = setTimeout(() => {
@@ -101,7 +101,8 @@ export default function NoteEditor({ note, onSave, onAutoSave }) {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/upload_and_analyze', {
+      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${API_BASE_URL}/api/upload_and_analyze`, {
         method: 'POST',
         body: formData,
       });
@@ -139,7 +140,7 @@ export default function NoteEditor({ note, onSave, onAutoSave }) {
         alert('Unsupported file type. Upload text, PDF, or image files only.');
       }
     });
-  }, [handleFileUpload]); 
+  }, [handleFileUpload]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop });
 
@@ -305,7 +306,7 @@ export default function NoteEditor({ note, onSave, onAutoSave }) {
             </Select>
           </FormControl>
         </Box>
-        
+
         {/* Export Buttons */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', pt: 1, borderTop: '1px solid #eee', mt: 1 }}>
           <Typography variant="body2" sx={{ fontWeight: 500, color: '#444' }}>Export as:</Typography>

@@ -1,10 +1,10 @@
-/* global globalThis, LanguageModel */ 
+/* global globalThis, LanguageModel */
 
 // frontend/src/api/aiService.js
 
-// This is your FastAPI backend, which has the *real* Gemini key
-//const FASTAPI_URL = 'http://localhost:8000/api/analyze';
-const FASTAPI_URL = 'https://notepilot-backend-bzgv.onrender.com/api/analyze';
+// Use environment variable for the backend API URL, default to localhost for dev
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const FASTAPI_URL = `${API_BASE_URL}/api/analyze`;
 
 /**
  * Universal AI function.
@@ -12,13 +12,13 @@ const FASTAPI_URL = 'https://notepilot-backend-bzgv.onrender.com/api/analyze';
  * 2. Falls back to your FastAPI backend if Nano is unavailable.
  */
 async function notePilotAI({ prompt, command, outputLanguage = "en" }) {
-  
+
   // 1. PRIMARY: Try Chrome Built-in AI (Gemini Nano)
   if ('LanguageModel' in globalThis && LanguageModel.create) {
     try {
       console.log("[Client AI]: LanguageModel available. Using On-Device Nano.");
       const session = await LanguageModel.create({ outputLanguage });
-      
+
       if (command === "SUMMARIZE") return await session.prompt("Summarize: " + prompt);
       if (command === "TRANSLATE") return await session.prompt("Translate to " + outputLanguage + ": " + prompt);
       if (command === "REWRITE") return await session.prompt("Rewrite: " + prompt);
@@ -45,7 +45,7 @@ async function notePilotAI({ prompt, command, outputLanguage = "en" }) {
         output_language: outputLanguage
       })
     });
-    
+
     if (!response.ok) throw new Error(`Server error: ${response.status}`);
     const result = await response.json();
     return result.answer || "No response from backend.";
@@ -56,20 +56,20 @@ async function notePilotAI({ prompt, command, outputLanguage = "en" }) {
 }
 
 // Export specific functions for components to use
-export const aiChat = (prompt) => notePilotAI({ 
-  prompt, 
-  command: "QUERY_FACTUAL" 
+export const aiChat = (prompt) => notePilotAI({
+  prompt,
+  command: "QUERY_FACTUAL"
 });
 
-export const aiSummarize = (prompt) => notePilotAI({ 
-  prompt, 
-  command: "SUMMARIZE" 
+export const aiSummarize = (prompt) => notePilotAI({
+  prompt,
+  command: "SUMMARIZE"
 });
 
-export const aiTranslate = (prompt, lang = "hi") => notePilotAI({ 
-  prompt, 
-  command: "TRANSLATE", 
-  outputLanguage: lang 
+export const aiTranslate = (prompt, lang = "hi") => notePilotAI({
+  prompt,
+  command: "TRANSLATE",
+  outputLanguage: lang
 });
 
 // --- NEW PROOFREAD EXPORT ---
