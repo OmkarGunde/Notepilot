@@ -95,7 +95,7 @@ export default function NoteEditor({ note, onSave, onAutoSave }) {
   }, [note]);
 
   /* ----------------------------- 📁 File Upload ----------------------------- */
-  const handleFileUpload = async (file) => {
+  const handleFileUpload = useCallback(async (file) => {
     setLoading(true);
     setFiles(prev => [...prev, file]);
     const formData = new FormData();
@@ -122,7 +122,7 @@ export default function NoteEditor({ note, onSave, onAutoSave }) {
       setFiles(prev => prev.filter(f => f.name !== file.name));
     }
     setLoading(false);
-  };
+  }, []);
 
   const onDrop = useCallback(acceptedFiles => {
     acceptedFiles.forEach(file => {
