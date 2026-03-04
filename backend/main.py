@@ -45,7 +45,7 @@ class Note(BaseModel):
 
 # --- FastAPI App & AI Model Initialization ---
 app = FastAPI(title="NotePilot AI Backend")
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # --- CORS (Security) ---
 app.add_middleware(
