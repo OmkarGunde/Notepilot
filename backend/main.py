@@ -148,6 +148,15 @@ async def upload_and_analyze(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
 
+# --- Health Check Endpoint ---
+@app.get("/health")
+def health_endpoint():
+    return {
+        "status": "healthy",
+        "service": "NotePilot AI Backend",
+        "gemini_configured": bool(GEMINI_API_KEY)
+    }
+
 # --- Main AI Endpoint (Real AI) ---
 @app.get("/api/analyze")
 def analyze_health():

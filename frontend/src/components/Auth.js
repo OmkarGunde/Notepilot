@@ -101,7 +101,7 @@ export default function Auth({ onDemoLogin }) {
         setStatusAlert({ text: error.message || 'Signup failed.', severity: 'error' });
       } else {
         setStatusAlert({
-          text: 'Account created! You can now sign in with your credentials.',
+          text: 'Account created successfully! Welcome to NotePilot.',
           severity: 'success'
         });
       }

@@ -2,11 +2,13 @@
 
 // frontend/src/api/aiService.js
 
-// Backend API URL (configured via environment or defaults to localhost in dev)
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-const FASTAPI_URL = `${API_BASE_URL}/api/analyze`;
+// Backend API URL: in production uses relative path /api/analyze, in dev can use localhost
+const API_BASE_URL = process.env.REACT_APP_API_URL !== undefined 
+  ? process.env.REACT_APP_API_URL 
+  : (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
+const FASTAPI_URL = API_BASE_URL ? `${API_BASE_URL}/api/analyze` : '/api/analyze';
 
-// Direct Gemini API fallback key (if backend service is offline)
+// Client-side fallback key (only if explicitly set in environment, never hardcoded)
 const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_API_KEY || '';
 
 /**
@@ -167,6 +169,8 @@ export async function notePilotAI({ prompt, command = "QUERY_FACTUAL", outputLan
       text: "",
       error: directErr.name === 'AbortError'
         ? "AI request timed out. Please check your network connection and retry."
+        : directErr.message.includes('not configured')
+        ? "AI backend service is currently offline or unreachable. Please verify server deployment and click retry."
         : `AI connection failed: ${directErr.message}. Click retry to try again.`,
       source: "Error"
     };

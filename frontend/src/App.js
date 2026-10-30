@@ -40,6 +40,22 @@ export default function App() {
   const [isEditorDirty, setIsEditorDirty] = useState(false);
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
 
+  // Notebook Modal Dialog State (Create / Rename) - replaces window.prompt
+  const [notebookDialog, setNotebookDialog] = useState({
+    open: false,
+    mode: 'create', // 'create' | 'rename'
+    notebook: null,
+    name: '',
+    error: ''
+  });
+
+  // Notebook Delete Confirmation Dialog State - replaces window.confirm
+  const [deleteNotebookDialog, setDeleteNotebookDialog] = useState({
+    open: false,
+    notebook: null,
+    noteCount: 0
+  });
+
   // Undo delete snackbar state
   const [deletedNoteUndo, setDeletedNoteUndo] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
@@ -192,73 +208,112 @@ export default function App() {
     setNotes(demoNotes);
   };
 
-  // Notebook CRUD
-  const handleAddNotebook = async () => {
-    const name = prompt("Enter new notebook name:");
-    if (!name || !name.trim()) return;
-
-    if (isDemoMode) {
-      const newNb = { id: Date.now(), name: name.trim() };
-      setNotebooks(prev => [...prev, newNb]);
-      setSelectedNotebook(newNb);
-      return;
-    }
-
-    if (!session) return;
-    const { data, error } = await supabase
-      .from('notebooks')
-      .insert([{ name: name.trim(), user_id: session.user.id }])
-      .select();
-
-    if (error) {
-      setSnackbar({ open: true, message: `Failed to create notebook: ${error.message}`, severity: 'error' });
-      return;
-    }
-
-    await fetchNotebooks();
-    if (data && data.length > 0) {
-      setSelectedNotebook(data[0]);
-    }
-    setSnackbar({ open: true, message: `Created notebook "${name.trim()}"`, severity: 'success' });
+  // Accessible Notebook Dialog Handlers (replaces window.prompt & window.confirm)
+  const handleOpenCreateNotebook = () => {
+    setNotebookDialog({
+      open: true,
+      mode: 'create',
+      notebook: null,
+      name: '',
+      error: ''
+    });
   };
 
-  const handleRenameNotebook = async (notebook) => {
-    const newName = prompt("Rename notebook:", notebook.name);
-    if (!newName || !newName.trim() || newName.trim() === notebook.name) return;
+  const handleOpenRenameNotebook = (notebook) => {
+    setNotebookDialog({
+      open: true,
+      mode: 'rename',
+      notebook,
+      name: notebook.name,
+      error: ''
+    });
+  };
 
-    if (isDemoMode) {
-      setNotebooks(prev => prev.map(nb => nb.id === notebook.id ? { ...nb, name: newName.trim() } : nb));
-      if (selectedNotebook?.id === notebook.id) {
-        setSelectedNotebook(prev => ({ ...prev, name: newName.trim() }));
+  const handleSaveNotebookModal = async () => {
+    const trimmed = notebookDialog.name.trim();
+    if (!trimmed) {
+      setNotebookDialog(prev => ({ ...prev, error: 'Notebook name cannot be empty' }));
+      return;
+    }
+
+    if (notebookDialog.mode === 'create') {
+      if (isDemoMode) {
+        const newNb = { id: Date.now(), name: trimmed };
+        setNotebooks(prev => [...prev, newNb]);
+        setSelectedNotebook(newNb);
+        setNotebookDialog(prev => ({ ...prev, open: false }));
+        setSnackbar({ open: true, message: `Created notebook "${trimmed}"`, severity: 'success' });
+        return;
       }
-      return;
+
+      if (!session) return;
+      const { data, error } = await supabase
+        .from('notebooks')
+        .insert([{ name: trimmed, user_id: session.user.id }])
+        .select();
+
+      if (error) {
+        setSnackbar({ open: true, message: `Failed to create notebook: ${error.message}`, severity: 'error' });
+        return;
+      }
+
+      await fetchNotebooks();
+      if (data && data.length > 0) {
+        setSelectedNotebook(data[0]);
+      }
+      setNotebookDialog(prev => ({ ...prev, open: false }));
+      setSnackbar({ open: true, message: `Created notebook "${trimmed}"`, severity: 'success' });
+    } else {
+      const targetNb = notebookDialog.notebook;
+      if (!targetNb) return;
+
+      if (isDemoMode) {
+        setNotebooks(prev => prev.map(nb => nb.id === targetNb.id ? { ...nb, name: trimmed } : nb));
+        if (selectedNotebook?.id === targetNb.id) {
+          setSelectedNotebook(prev => ({ ...prev, name: trimmed }));
+        }
+        setNotebookDialog(prev => ({ ...prev, open: false }));
+        setSnackbar({ open: true, message: `Renamed to "${trimmed}"`, severity: 'success' });
+        return;
+      }
+
+      const { error } = await supabase
+        .from('notebooks')
+        .update({ name: trimmed })
+        .eq('id', targetNb.id);
+
+      if (error) {
+        setSnackbar({ open: true, message: `Failed to rename notebook: ${error.message}`, severity: 'error' });
+        return;
+      }
+
+      fetchNotebooks();
+      if (selectedNotebook?.id === targetNb.id) {
+        setSelectedNotebook(prev => ({ ...prev, name: trimmed }));
+      }
+      setNotebookDialog(prev => ({ ...prev, open: false }));
+      setSnackbar({ open: true, message: `Renamed to "${trimmed}"`, severity: 'success' });
     }
-
-    const { error } = await supabase
-      .from('notebooks')
-      .update({ name: newName.trim() })
-      .eq('id', notebook.id);
-
-    if (error) {
-      setSnackbar({ open: true, message: `Failed to rename notebook: ${error.message}`, severity: 'error' });
-      return;
-    }
-
-    fetchNotebooks();
-    setSnackbar({ open: true, message: `Renamed to "${newName.trim()}"`, severity: 'success' });
   };
 
-  const handleDeleteNotebook = async (notebook) => {
-    const noteCount = notes.filter(n => n.notebook_id === notebook.id).length;
-    const confirmMsg = noteCount > 0
-      ? `Are you sure you want to delete "${notebook.name}" and all its ${noteCount} note(s)?`
-      : `Are you sure you want to delete "${notebook.name}"?`;
+  const handleOpenDeleteNotebook = (notebook) => {
+    const count = notes.filter(n => n.notebook_id === notebook.id).length;
+    setDeleteNotebookDialog({
+      open: true,
+      notebook,
+      noteCount: count
+    });
+  };
 
-    if (!window.confirm(confirmMsg)) return;
+  const handleConfirmDeleteNotebook = async () => {
+    const notebook = deleteNotebookDialog.notebook;
+    if (!notebook) return;
 
     if (isDemoMode) {
       setNotebooks(prev => prev.filter(nb => nb.id !== notebook.id));
       if (selectedNotebook?.id === notebook.id) setSelectedNotebook(null);
+      setDeleteNotebookDialog({ open: false, notebook: null, noteCount: 0 });
+      setSnackbar({ open: true, message: `Deleted notebook "${notebook.name}"`, severity: 'info' });
       return;
     }
 
@@ -270,6 +325,8 @@ export default function App() {
         return;
       }
       fetchNotebooks();
+      if (selectedNotebook?.id === notebook.id) setSelectedNotebook(null);
+      setDeleteNotebookDialog({ open: false, notebook: null, noteCount: 0 });
       setSnackbar({ open: true, message: `Deleted notebook "${notebook.name}"`, severity: 'info' });
     } catch (err) {
       setSnackbar({ open: true, message: `Delete failed: ${err.message}`, severity: 'error' });
@@ -356,8 +413,7 @@ export default function App() {
         .from('notes')
         .update({
           title: noteData.title || 'Untitled Note',
-          content: noteData.content || '',
-          updated_at: new Date().toISOString()
+          content: noteData.content || ''
         })
         .eq('id', noteData.id)
         .eq('user_id', session.user.id);
@@ -539,9 +595,9 @@ export default function App() {
               notebooks={notebooks}
               selectedNotebook={selectedNotebook}
               onSelectNotebook={setSelectedNotebook}
-              onAddNotebook={handleAddNotebook}
-              onRenameNotebook={handleRenameNotebook}
-              onDeleteNotebook={handleDeleteNotebook}
+              onAddNotebook={handleOpenCreateNotebook}
+              onRenameNotebook={handleOpenRenameNotebook}
+              onDeleteNotebook={handleOpenDeleteNotebook}
               mobileOpen={mobileSidebarOpen}
               onMobileClose={() => setMobileSidebarOpen(false)}
             />
@@ -666,12 +722,79 @@ export default function App() {
             <Button
               color="error"
               onClick={() => {
+                const draftKey = `notepilot_draft_${selectedNote?.id || selectedNote?.notebook_id || 'new'}`;
+                try {
+                  localStorage.removeItem(draftKey);
+                } catch (e) {
+                  console.warn("Could not clear local draft:", e);
+                }
                 setConfirmLeaveOpen(false);
                 setIsEditorDirty(false);
                 setSelectedNote(null);
               }}
             >
               Discard & Go Back
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Notebook Create / Rename Dialog (Replaces native window.prompt) */}
+        <Dialog
+          open={notebookDialog.open}
+          onClose={() => setNotebookDialog(prev => ({ ...prev, open: false }))}
+          maxWidth="xs"
+          fullWidth
+        >
+          <form onSubmit={(e) => { e.preventDefault(); handleSaveNotebookModal(); }}>
+            <DialogTitle>
+              {notebookDialog.mode === 'create' ? 'Create New Notebook' : 'Rename Notebook'}
+            </DialogTitle>
+            <DialogContent>
+              <TextField
+                autoFocus
+                margin="dense"
+                label="Notebook Name"
+                fullWidth
+                variant="outlined"
+                value={notebookDialog.name}
+                error={Boolean(notebookDialog.error)}
+                helperText={notebookDialog.error}
+                onChange={(e) => setNotebookDialog(prev => ({ ...prev, name: e.target.value, error: '' }))}
+                placeholder="e.g., Biology 101, Project Ideas"
+              />
+            </DialogContent>
+            <DialogActions sx={{ px: 3, pb: 2 }}>
+              <Button onClick={() => setNotebookDialog(prev => ({ ...prev, open: false }))}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="contained">
+                {notebookDialog.mode === 'create' ? 'Create' : 'Save'}
+              </Button>
+            </DialogActions>
+          </form>
+        </Dialog>
+
+        {/* Delete Notebook Confirmation Dialog (Replaces native window.confirm) */}
+        <Dialog
+          open={deleteNotebookDialog.open}
+          onClose={() => setDeleteNotebookDialog({ open: false, notebook: null, noteCount: 0 })}
+          maxWidth="xs"
+          fullWidth
+        >
+          <DialogTitle>Delete Notebook</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              {deleteNotebookDialog.noteCount > 0
+                ? `Are you sure you want to delete "${deleteNotebookDialog.notebook?.name}" and all its ${deleteNotebookDialog.noteCount} note(s)? This action cannot be undone.`
+                : `Are you sure you want to delete "${deleteNotebookDialog.notebook?.name}"?`}
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Button onClick={() => setDeleteNotebookDialog({ open: false, notebook: null, noteCount: 0 })}>
+              Cancel
+            </Button>
+            <Button color="error" variant="contained" onClick={handleConfirmDeleteNotebook}>
+              Delete
             </Button>
           </DialogActions>
         </Dialog>

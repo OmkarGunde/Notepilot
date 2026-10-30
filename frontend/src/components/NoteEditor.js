@@ -69,13 +69,15 @@ function htmlToMarkdown(html, noteTitle) {
 // Enhanced Text-to-Speech Hook
 function useSpeech() {
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechError, setSpeechError] = useState('');
 
   const speakText = (text, lang = 'en-US') => {
     if (!('speechSynthesis' in window)) {
-      alert("Your browser does not support Speech Synthesis.");
+      setSpeechError("Your browser does not support Speech Synthesis.");
       return;
     }
     if (!text || !text.trim()) return;
+    setSpeechError('');
     window.speechSynthesis.cancel();
     const cleanText = htmlToFormattedText(text);
     const utterance = new SpeechSynthesisUtterance(cleanText);
@@ -96,21 +98,22 @@ function useSpeech() {
     setIsSpeaking(false);
   };
 
-  return { isSpeaking, speakText, stopSpeaking };
+  return { isSpeaking, speakText, stopSpeaking, speechError, setSpeechError };
 }
 
 export default function NoteEditor({ note, onSave, onAutoSave, onDirtyChange }) {
   const [title, setTitle] = useState(note ? note.title : '');
   const [content, setContent] = useState(note ? note.content : '');
   const [loading, setLoading] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'dirty' | 'error'
+  // Brand-new empty notes should not display "Saved" before any save occurs
+  const [saveStatus, setSaveStatus] = useState(note?.id ? 'saved' : ''); // '' | 'saved' | 'saving' | 'dirty' | 'error'
   const [saveErrorMessage, setSaveErrorMessage] = useState('');
 
   // AI Output state
   const [aiOutput, setAiOutput] = useState({ title: '', text: '', isError: false, lastCommand: null });
   const [targetLang, setTargetLang] = useState('hi');
   const [ttsLang, setTtsLang] = useState('en-US');
-  const { isSpeaking, speakText, stopSpeaking } = useSpeech();
+  const { isSpeaking, speakText, stopSpeaking, speechError, setSpeechError } = useSpeech();
 
   // File upload state & errors (Issue 14)
   const [uploadError, setUploadError] = useState('');
@@ -155,7 +158,7 @@ export default function NoteEditor({ note, onSave, onAutoSave, onDirtyChange }) 
     lastSavedContentRef.current = note ? note.content : '';
     noteIdRef.current = note ? note.id : null;
     notebookIdRef.current = note ? note.notebook_id : null;
-    setSaveStatus('saved');
+    setSaveStatus(note?.id ? 'saved' : '');
     setAiOutput({ title: '', text: '', isError: false, lastCommand: null });
     setUploadError('');
     if (onDirtyChange) onDirtyChange(false);
@@ -438,6 +441,13 @@ export default function NoteEditor({ note, onSave, onAutoSave, onDirtyChange }) 
           sx={{ borderRadius: 2 }}
         >
           An unsaved local draft for this note was recovered. Would you like to restore it?
+        </Alert>
+      )}
+
+      {/* Inline speech synthesis error banner (replaces native alert) */}
+      {speechError && (
+        <Alert severity="warning" onClose={() => setSpeechError('')} sx={{ borderRadius: 2 }}>
+          {speechError}
         </Alert>
       )}
 
