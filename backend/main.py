@@ -14,18 +14,24 @@ import io
 import google.generativeai as genai
 from supabase_service import get_notes, add_note, get_user_id_from_token
 
-# ---
-# --- 🛠️ CRITICAL TESSERACT FIX 🛠️ ---
-#pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+# --- 🛠️ TESSERACT CONFIGURATION 🛠️ ---
+tesseract_env = os.getenv("TESSERACT_CMD")
+if tesseract_env and os.path.exists(tesseract_env):
+    pytesseract.pytesseract.tesseract_cmd = tesseract_env
+elif os.path.exists(r"C:\Program Files\Tesseract-OCR\tesseract.exe"):
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+elif os.path.exists("/usr/bin/tesseract"):
+    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
 # ------------------------------------
-# ---
 
 # --- Configuration ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    print("Gemini API configured successfully.")
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        print("Gemini API configured successfully.")
+    except Exception as e:
+        print(f"Error configuring Gemini: {e}")
 else:
     print("WARNING: GEMINI_API_KEY not found. AI features will be skipped.")
 
@@ -143,6 +149,15 @@ async def upload_and_analyze(file: UploadFile = File(...)):
 
 
 # --- Main AI Endpoint (Real AI) ---
+@app.get("/api/analyze")
+def analyze_health():
+    return {
+        "status": "online",
+        "service": "NotePilot AI Backend",
+        "supported_commands": ["QUERY_FACTUAL", "SUMMARIZE", "TRANSLATE", "REWRITE", "PROOFREAD"],
+        "gemini_configured": bool(GEMINI_API_KEY)
+    }
+
 @app.post("/api/analyze")
 def analyze_query(query: QueryWithContext):
     context = query.text
@@ -152,40 +167,50 @@ def analyze_query(query: QueryWithContext):
 
     answer = ""
     citation = "N/A"
-    source = "NotePilot AI Engine (Gemini 1.5 Flash)"
+    source = "NotePilot AI Engine (Gemini Flash)"
     prompt = ""
+
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="AI service is not configured (missing GEMINI_API_KEY on server)."
+        )
 
     try:
         if command == "QUERY_FACTUAL" and not context:
             prompt = user_question
         elif command == "SUMMARIZE":
-            prompt = f"Summarize the following text: {context}"
+            prompt = f"Summarize the following text clearly and concisely:\n\n{context}"
         elif command == "TRANSLATE":
-            prompt = f"Translate the following text to {output_language}: {context}"
+            prompt = f"Translate the following text to {output_language}:\n\n{context}"
         elif command == "REWRITE":
-            prompt = f"Rewrite and improve the following text: {context}"
-        # --- NEW PROOFREAD COMMAND ---
+            prompt = f"Rewrite and improve the following text:\n\n{context}"
         elif command == "PROOFREAD":
-            prompt = f"Proofread the following text. Correct spelling and grammar mistakes. Only return the corrected text: {context}"
-        # -----------------------------
+            prompt = f"Proofread the following text. Correct spelling and grammar mistakes. Only return the corrected text:\n\n{context}"
         elif command == "QUERY_FACTUAL" and context:
-            prompt = f"Based on the following context, answer the question.\nContext: {context}\nQuestion: {user_question}"
+            prompt = f"Based on the following note content, answer the question accurately.\nNote Content:\n{context}\n\nQuestion: {user_question}"
         else:
             raise HTTPException(status_code=400, detail=f"Unknown command: {command}")
         
         response = model.generate_content(prompt)
-        answer = response.text
+        answer = response.text or ""
 
+        return {
+            "status": "success",
+            "command": command,
+            "answer": answer,
+            "source": source,
+            "citation": citation
+        }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        answer = f"An error occurred while processing your request: {str(e)}"
-        source = "Error Handler"
-
-    return {
-        "command": command,
-        "answer": answer,
-        "source": source,
-        "citation": citation
-    }
+        print(f"Gemini generation error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI generation failed: {str(e)}"
+        )
 
 # --- Supabase Note Endpoints (For Web App) ---
 @app.get("/api/notes")
