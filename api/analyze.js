@@ -42,19 +42,27 @@ module.exports = async (req, res) => {
       });
     }
 
+    const currentDate = new Date().toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
     let constructedPrompt = '';
+    const dateContext = `[Context: Today's date is ${currentDate}]. `;
     if (command === 'SUMMARIZE') {
-      constructedPrompt = `Summarize the following text clearly and concisely, highlighting key points in bullet points:\n\n${context || queryQuestion}`;
+      constructedPrompt = `${dateContext}Summarize the following text clearly and concisely, highlighting key points in bullet points:\n\n${context || queryQuestion}`;
     } else if (command === 'TRANSLATE') {
       constructedPrompt = `Translate the following text accurately into ${lang}. Return only the translated text:\n\n${context || queryQuestion}`;
     } else if (command === 'PROOFREAD') {
       constructedPrompt = `Proofread the following text. Correct spelling, punctuation, and grammar mistakes while keeping original structure. Return only the corrected text:\n\n${context || queryQuestion}`;
     } else if (command === 'REWRITE') {
-      constructedPrompt = `Rewrite and polish the following text for clarity and professional tone:\n\n${context || queryQuestion}`;
+      constructedPrompt = `${dateContext}Rewrite and polish the following text for clarity and professional tone:\n\n${context || queryQuestion}`;
     } else if (context) {
-      constructedPrompt = `You are NotePilot AI. Using the provided note context, answer the user's question accurately.\n\nNote Context:\n${context}\n\nQuestion: ${queryQuestion}`;
+      constructedPrompt = `You are NotePilot AI. ${dateContext}Using the provided note context, answer the user's question accurately.\n\nNote Context:\n${context}\n\nQuestion: ${queryQuestion}`;
     } else {
-      constructedPrompt = queryQuestion || 'Hello! How can I assist you with your notes today?';
+      constructedPrompt = `You are NotePilot AI, an intelligent study assistant. ${dateContext}${queryQuestion || 'Hello! How can I assist you with your notes today?'}`;
     }
 
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;

@@ -2,11 +2,21 @@
 
 // frontend/src/api/aiService.js
 
-// Backend API URL: in production uses relative path /api/analyze, in dev can use localhost
-const API_BASE_URL = process.env.REACT_APP_API_URL !== undefined 
-  ? process.env.REACT_APP_API_URL 
-  : (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
-const FASTAPI_URL = API_BASE_URL ? `${API_BASE_URL}/api/analyze` : '/api/analyze';
+// Backend API URL detection:
+// 1. In production, ignore expired/dead Railway URLs that may be baked into Vercel build settings.
+// 2. Default to relative /api/analyze so Vercel Serverless Function serves requests.
+// 3. In local dev (localhost), default to http://localhost:8000.
+const rawApiUrl = process.env.REACT_APP_API_URL || '';
+const isRailwayDead = rawApiUrl.includes('railway.app');
+const isLocalhost = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+
+// Primary backend endpoint for AI calls
+const PRIMARY_API_URL = (!isRailwayDead && rawApiUrl)
+  ? `${rawApiUrl.replace(/\/+$/, '')}/api/analyze`
+  : (isLocalhost ? 'http://localhost:8000/api/analyze' : '/api/analyze');
+
+// Serverless fallback URL on same origin
+const SERVERLESS_API_URL = '/api/analyze';
 
 // Client-side fallback key (only if explicitly set in environment, never hardcoded)
 const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_API_KEY || '';
@@ -33,7 +43,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
  */
 async function callDirectGemini(prompt) {
   if (!GEMINI_API_KEY) {
-    throw new Error('Gemini API key is not configured.');
+    throw new Error('Gemini API key is not configured for direct browser calls.');
   }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -61,8 +71,9 @@ async function callDirectGemini(prompt) {
 /**
  * Universal NotePilot AI Runner.
  * 1. Checks Chrome Built-in AI (Gemini Nano) first.
- * 2. Attempts FastAPI Cloud Backend with timeout.
- * 3. Falls back to direct Gemini API if backend is unavailable.
+ * 2. Attempts PRIMARY_API_URL (/api/analyze or local Python server).
+ * 3. Falls back to Vercel Serverless Function (/api/analyze) if primary failed.
+ * 4. Falls back to direct Gemini API if client key is configured.
  *
  * Returns: { success: boolean, text: string, error?: string, source: string }
  */
@@ -107,74 +118,96 @@ export async function notePilotAI({ prompt, command = "QUERY_FACTUAL", outputLan
     }
   }
 
-  // 2. SECONDARY: FastAPI Backend
-  console.log(`[AI Engine]: Connecting to NotePilot Backend at ${FASTAPI_URL}...`);
-  try {
-    const response = await fetchWithTimeout(FASTAPI_URL, {
-      method: "POST",
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: context || prompt,
-        question: prompt,
-        command: command,
-        output_language: outputLanguage
-      })
-    }, 12000);
+  // 2. SECONDARY: Primary Backend (/api/analyze or local dev)
+  const endpointsToTry = [PRIMARY_API_URL];
+  if (PRIMARY_API_URL !== SERVERLESS_API_URL && !endpointsToTry.includes(SERVERLESS_API_URL)) {
+    endpointsToTry.push(SERVERLESS_API_URL);
+  }
 
-    if (response.ok) {
-      const data = await response.json();
-      const answer = data.answer || data.result;
-      if (answer) {
-        return {
-          success: true,
-          text: answer.trim(),
-          source: data.source || "NotePilot Cloud AI"
-        };
+  let lastBackendError = null;
+
+  for (const endpoint of endpointsToTry) {
+    try {
+      console.log(`[AI Engine]: Connecting to NotePilot Backend at ${endpoint}...`);
+      const response = await fetchWithTimeout(endpoint, {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: context || prompt,
+          question: prompt,
+          command: command,
+          output_language: outputLanguage
+        })
+      }, 15000);
+
+      if (response.ok) {
+        const data = await response.json();
+        const answer = data.answer || data.result;
+        if (answer) {
+          return {
+            success: true,
+            text: answer.trim(),
+            source: data.source || "NotePilot Cloud AI"
+          };
+        }
+      } else {
+        const errJson = await response.json().catch(() => ({}));
+        if (response.status === 503) {
+          lastBackendError = "AI service is reachable, but GEMINI_API_KEY is not configured in Vercel project environment variables. Please add GEMINI_API_KEY in your Vercel dashboard.";
+        } else {
+          lastBackendError = errJson.error || errJson.detail || `Server returned HTTP ${response.status}`;
+        }
+        console.warn(`[AI Engine] ${endpoint} returned HTTP ${response.status}:`, lastBackendError);
       }
-    } else {
-      console.warn(`NotePilot Backend returned HTTP ${response.status}`);
+    } catch (backendErr) {
+      console.warn(`[AI Engine] Connection to ${endpoint} failed:`, backendErr.message);
+      lastBackendError = backendErr.message;
     }
-  } catch (backendErr) {
-    console.warn("NotePilot Backend request failed:", backendErr.message);
   }
 
-  // 3. TERTIARY: Direct Gemini Fallback
-  console.log("[AI Engine]: Using Direct Gemini Cloud Fallback...");
-  try {
-    let fullPrompt = "";
-    if (command === "SUMMARIZE") {
-      fullPrompt = `Summarize the following text clearly and concisely, maintaining the key points in bullet points or paragraphs:\n\n${context || prompt}`;
-    } else if (command === "TRANSLATE") {
-      fullPrompt = `Translate the following text accurately into ${outputLanguage}. Only return the translation:\n\n${context || prompt}`;
-    } else if (command === "PROOFREAD") {
-      fullPrompt = `Proofread the following text. Fix all spelling, grammar, punctuation, and typographical mistakes while preserving original tone. Only return the corrected text:\n\n${context || prompt}`;
-    } else if (command === "REWRITE") {
-      fullPrompt = `Rewrite and polish the following text for clarity, professional tone, and eloquence:\n\n${context || prompt}`;
-    } else if (context) {
-      fullPrompt = `You are NotePilot AI. Use the provided note context to answer the user's question clearly.\n\nNote Context:\n${context}\n\nQuestion:\n${prompt}`;
-    } else {
-      fullPrompt = `You are NotePilot AI, an intelligent study and note-taking assistant. Answer the user's question clearly and helpfully:\n\n${prompt}`;
-    }
+  // 3. TERTIARY: Direct Gemini Fallback (if GEMINI_API_KEY is configured in client)
+  if (GEMINI_API_KEY) {
+    console.log("[AI Engine]: Using Direct Gemini Cloud Fallback...");
+    try {
+      let fullPrompt = "";
+      if (command === "SUMMARIZE") {
+        fullPrompt = `Summarize the following text clearly and concisely, maintaining the key points in bullet points or paragraphs:\n\n${context || prompt}`;
+      } else if (command === "TRANSLATE") {
+        fullPrompt = `Translate the following text accurately into ${outputLanguage}. Only return the translation:\n\n${context || prompt}`;
+      } else if (command === "PROOFREAD") {
+        fullPrompt = `Proofread the following text. Fix all spelling, grammar, punctuation, and typographical mistakes while preserving original tone. Only return the corrected text:\n\n${context || prompt}`;
+      } else if (command === "REWRITE") {
+        fullPrompt = `Rewrite and polish the following text for clarity, professional tone, and eloquence:\n\n${context || prompt}`;
+      } else if (context) {
+        fullPrompt = `You are NotePilot AI. Use the provided note context to answer the user's question clearly.\n\nNote Context:\n${context}\n\nQuestion:\n${prompt}`;
+      } else {
+        fullPrompt = `You are NotePilot AI, an intelligent study and note-taking assistant. Answer the user's question clearly and helpfully:\n\n${prompt}`;
+      }
 
-    const answer = await callDirectGemini(fullPrompt);
-    return {
-      success: true,
-      text: answer.trim(),
-      source: "NotePilot AI Engine (Gemini Cloud)"
-    };
-  } catch (directErr) {
-    console.error("All AI paths exhausted:", directErr.message);
-    return {
-      success: false,
-      text: "",
-      error: directErr.name === 'AbortError'
-        ? "AI request timed out. Please check your network connection and retry."
-        : directErr.message.includes('not configured')
-        ? "AI backend service is currently offline or unreachable. Please verify server deployment and click retry."
-        : `AI connection failed: ${directErr.message}. Click retry to try again.`,
-      source: "Error"
-    };
+      const answer = await callDirectGemini(fullPrompt);
+      return {
+        success: true,
+        text: answer.trim(),
+        source: "NotePilot AI Engine (Gemini Cloud Direct)"
+      };
+    } catch (directErr) {
+      console.error("Direct Gemini fallback failed:", directErr.message);
+    }
   }
+
+  // If all failed, provide a clean, user-friendly diagnostic message
+  const errorMsg = lastBackendError
+    ? (lastBackendError.includes("GEMINI_API_KEY") 
+        ? "AI service is reachable, but GEMINI_API_KEY is missing from Vercel environment variables. Please add GEMINI_API_KEY in Vercel Project Settings > Environment Variables."
+        : `AI backend error: ${lastBackendError}. Click retry to try again.`)
+    : "AI backend service is currently offline or unreachable. Please verify server deployment and click retry.";
+
+  return {
+    success: false,
+    text: "",
+    error: errorMsg,
+    source: "Error"
+  };
 }
 
 // Helper exports

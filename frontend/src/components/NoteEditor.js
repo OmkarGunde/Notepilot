@@ -17,6 +17,7 @@ import SyncIcon from '@mui/icons-material/Sync';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import RestorePageIcon from '@mui/icons-material/RestorePage';
 import TiptapEditor from './TiptapEditor';
+import Tesseract from 'tesseract.js';
 import { saveAs } from 'file-saver';
 
 // Helper to sanitize text before inserting into editor
@@ -286,7 +287,12 @@ export default function NoteEditor({ note, onSave, onAutoSave, onDirtyChange }) 
     formData.append('file', file);
 
     try {
-      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      // Ignore dead Railway URL
+      const rawApiUrl = process.env.REACT_APP_API_URL || '';
+      const isDeadRailway = rawApiUrl.includes('railway.app');
+      const API_BASE_URL = (!isDeadRailway && rawApiUrl)
+        ? rawApiUrl
+        : (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
@@ -313,7 +319,25 @@ export default function NoteEditor({ note, onSave, onAutoSave, onDirtyChange }) 
         setUploadError(`File "${file.name}" processed, but no readable text could be extracted.`);
       }
     } catch (error) {
-      setUploadError(`Upload error for "${file.name}": ${error.message}`);
+      if (file.type.startsWith('image/')) {
+        try {
+          console.log("[OCR]: Processing image via browser Tesseract engine...");
+          const tesseractResult = await Tesseract.recognize(file, 'eng');
+          const extracted = tesseractResult?.data?.text?.trim();
+          if (extracted) {
+            const safeName = escapeHtml(file.name);
+            const safeText = escapeHtml(extracted).replace(/\n/g, '<br>');
+            const fileHtml = `<h3>📄 Document: ${safeName}</h3><p>${safeText}</p><br>`;
+            setContent(prev => (prev ? prev + '<br>' + fileHtml : fileHtml));
+            return;
+          }
+        } catch (ocrErr) {
+          console.warn("Client OCR failed:", ocrErr.message);
+        }
+      }
+      setUploadError(file.type === 'application/pdf'
+        ? `PDF extraction requires an active backend server. Please upload an image or text file.`
+        : `Could not extract text from "${file.name}".`);
     } finally {
       setLoading(false);
       setUploadingFileName('');
