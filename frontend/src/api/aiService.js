@@ -1,80 +1,208 @@
-/* global globalThis, LanguageModel */
+/* global globalThis */
 
 // frontend/src/api/aiService.js
 
-// Use environment variable for the backend API URL, default to localhost for dev
+// Backend API URL (configured via environment or defaults to localhost in dev)
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 const FASTAPI_URL = `${API_BASE_URL}/api/analyze`;
 
+// Direct Gemini API fallback key (if backend service is offline)
+const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_API_KEY || '';
+
 /**
- * Universal AI function.
- * 1. Tries Chrome Built-in AI (LanguageModel/Nano) first.
- * 2. Falls back to your FastAPI backend if Nano is unavailable.
+ * Executes a call with a timeout using AbortController
  */
-async function notePilotAI({ prompt, command, outputLanguage = "en" }) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
-  // 1. PRIMARY: Try Chrome Built-in AI (Gemini Nano)
-  if ('LanguageModel' in globalThis && LanguageModel.create) {
+/**
+ * Direct call to Google Gemini REST API as a robust fallback
+ */
+async function callDirectGemini(prompt) {
+  if (!GEMINI_API_KEY) {
+    throw new Error('Gemini API key is not configured.');
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+  const response = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }]
+    })
+  }, 15000);
+
+  if (!response.ok) {
+    const errBody = await response.json().catch(() => ({}));
+    throw new Error(errBody.error?.message || `Gemini API returned status ${response.status}`);
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error('Gemini returned an empty response.');
+  }
+  return text;
+}
+
+/**
+ * Universal NotePilot AI Runner.
+ * 1. Checks Chrome Built-in AI (Gemini Nano) first.
+ * 2. Attempts FastAPI Cloud Backend with timeout.
+ * 3. Falls back to direct Gemini API if backend is unavailable.
+ *
+ * Returns: { success: boolean, text: string, error?: string, source: string }
+ */
+export async function notePilotAI({ prompt, command = "QUERY_FACTUAL", outputLanguage = "en", context = "" }) {
+  if (!prompt && !context) {
+    return {
+      success: false,
+      text: "",
+      error: "Prompt or content cannot be empty.",
+      source: "Validation"
+    };
+  }
+
+  // 1. PRIMARY: Chrome Built-in On-Device AI (Gemini Nano)
+  if (typeof globalThis !== 'undefined' && 'LanguageModel' in globalThis && globalThis.LanguageModel.create) {
     try {
-      console.log("[Client AI]: LanguageModel available. Using On-Device Nano.");
-      const session = await LanguageModel.create({ outputLanguage });
+      console.log("[AI Engine]: Trying On-Device LanguageModel...");
+      const session = await globalThis.LanguageModel.create({ outputLanguage });
+      let resultText = "";
 
-      if (command === "SUMMARIZE") return await session.prompt("Summarize: " + prompt);
-      if (command === "TRANSLATE") return await session.prompt("Translate to " + outputLanguage + ": " + prompt);
-      if (command === "REWRITE") return await session.prompt("Rewrite: " + prompt);
-      // --- NEW PROOFREAD COMMAND ---
-      if (command === "PROOFREAD") return await session.prompt("Proofread and correct this text: " + prompt);
-      // -----------------------------
-      return await session.prompt(prompt); // Default Q&A
+      if (command === "SUMMARIZE") {
+        resultText = await session.prompt("Summarize the following clearly and concisely:\n\n" + (context || prompt));
+      } else if (command === "TRANSLATE") {
+        resultText = await session.prompt(`Translate the following to ${outputLanguage}:\n\n` + (context || prompt));
+      } else if (command === "REWRITE") {
+        resultText = await session.prompt("Rewrite and improve the following text:\n\n" + (context || prompt));
+      } else if (command === "PROOFREAD") {
+        resultText = await session.prompt("Proofread and correct spelling and grammar mistakes in this text:\n\n" + (context || prompt));
+      } else {
+        resultText = await session.prompt(prompt);
+      }
 
-    } catch (err) {
-      console.warn("Chrome built-in AI errored, falling back to cloud:", err.message);
+      if (resultText && resultText.trim()) {
+        return {
+          success: true,
+          text: resultText.trim(),
+          source: "On-Device AI (Chrome Nano)"
+        };
+      }
+    } catch (nanoErr) {
+      console.warn("On-device AI not available or failed, using cloud engine:", nanoErr.message);
     }
   }
 
-  // 2. FALLBACK: Use your FastAPI Backend
-  console.log("[Cloud Fallback]: LanguageModel not found. Calling FastAPI backend.");
+  // 2. SECONDARY: FastAPI Backend
+  console.log(`[AI Engine]: Connecting to NotePilot Backend at ${FASTAPI_URL}...`);
   try {
-    const response = await fetch(FASTAPI_URL, {
+    const response = await fetchWithTimeout(FASTAPI_URL, {
       method: "POST",
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        text: prompt,
+        text: context || prompt,
         question: prompt,
         command: command,
         output_language: outputLanguage
       })
-    });
+    }, 12000);
 
-    if (!response.ok) throw new Error(`Server error: ${response.status}`);
-    const result = await response.json();
-    return result.answer || "No response from backend.";
+    if (response.ok) {
+      const data = await response.json();
+      const answer = data.answer || data.result;
+      if (answer) {
+        return {
+          success: true,
+          text: answer.trim(),
+          source: data.source || "NotePilot Cloud AI"
+        };
+      }
+    } else {
+      console.warn(`NotePilot Backend returned HTTP ${response.status}`);
+    }
+  } catch (backendErr) {
+    console.warn("NotePilot Backend request failed:", backendErr.message);
+  }
 
-  } catch (err) {
-    return `❌ AI Fallback Error: ${err.message}`;
+  // 3. TERTIARY: Direct Gemini Fallback
+  console.log("[AI Engine]: Using Direct Gemini Cloud Fallback...");
+  try {
+    let fullPrompt = "";
+    if (command === "SUMMARIZE") {
+      fullPrompt = `Summarize the following text clearly and concisely, maintaining the key points in bullet points or paragraphs:\n\n${context || prompt}`;
+    } else if (command === "TRANSLATE") {
+      fullPrompt = `Translate the following text accurately into ${outputLanguage}. Only return the translation:\n\n${context || prompt}`;
+    } else if (command === "PROOFREAD") {
+      fullPrompt = `Proofread the following text. Fix all spelling, grammar, punctuation, and typographical mistakes while preserving original tone. Only return the corrected text:\n\n${context || prompt}`;
+    } else if (command === "REWRITE") {
+      fullPrompt = `Rewrite and polish the following text for clarity, professional tone, and eloquence:\n\n${context || prompt}`;
+    } else if (context) {
+      fullPrompt = `You are NotePilot AI. Use the provided note context to answer the user's question clearly.\n\nNote Context:\n${context}\n\nQuestion:\n${prompt}`;
+    } else {
+      fullPrompt = `You are NotePilot AI, an intelligent study and note-taking assistant. Answer the user's question clearly and helpfully:\n\n${prompt}`;
+    }
+
+    const answer = await callDirectGemini(fullPrompt);
+    return {
+      success: true,
+      text: answer.trim(),
+      source: "NotePilot AI Engine (Gemini Cloud)"
+    };
+  } catch (directErr) {
+    console.error("All AI paths exhausted:", directErr.message);
+    return {
+      success: false,
+      text: "",
+      error: directErr.name === 'AbortError'
+        ? "AI request timed out. Please check your network connection and retry."
+        : `AI connection failed: ${directErr.message}. Click retry to try again.`,
+      source: "Error"
+    };
   }
 }
 
-// Export specific functions for components to use
-export const aiChat = (prompt) => notePilotAI({
-  prompt,
-  command: "QUERY_FACTUAL"
-});
+// Helper exports
+export const aiChat = async (prompt, context = "") => {
+  return await notePilotAI({
+    prompt,
+    context,
+    command: "QUERY_FACTUAL"
+  });
+};
 
-export const aiSummarize = (prompt) => notePilotAI({
-  prompt,
-  command: "SUMMARIZE"
-});
+export const aiSummarize = async (text) => {
+  return await notePilotAI({
+    prompt: "Summarize this note",
+    context: text,
+    command: "SUMMARIZE"
+  });
+};
 
-export const aiTranslate = (prompt, lang = "hi") => notePilotAI({
-  prompt,
-  command: "TRANSLATE",
-  outputLanguage: lang
-});
+export const aiTranslate = async (text, lang = "hi") => {
+  return await notePilotAI({
+    prompt: `Translate to ${lang}`,
+    context: text,
+    command: "TRANSLATE",
+    outputLanguage: lang
+  });
+};
 
-// --- NEW PROOFREAD EXPORT ---
-export const aiProofread = (prompt) => notePilotAI({
-  prompt,
-  command: "PROOFREAD"
-});
-// ----------------------------
+export const aiProofread = async (text) => {
+  return await notePilotAI({
+    prompt: "Proofread this note",
+    context: text,
+    command: "PROOFREAD"
+  });
+};

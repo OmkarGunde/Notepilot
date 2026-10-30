@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+backend/venv/
+backend/venv_win/
+venv/
+venv*/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+*.env.local
+
+# Production build outputs
+frontend/build/
+dist/
+
+# OS and Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
